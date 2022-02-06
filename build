@@ -1,0 +1,113 @@
+#!/bin/sh
+# Generate a static HTML website from Markdown with pandoc(1).
+set -eu
+
+if [ $# -ne 0 ]; then
+	echo usage: $0 1>&2
+	echo Generate a static HTML website.
+	exit 1
+fi
+
+cd `dirname "$0"`
+rootdir=`pwd`
+rm -rf "$rootdir/public"
+mkdir "$rootdir/public"
+outdir=`readlink -f "$rootdir"/public`
+
+# HTML Tidy executable name
+if command -v tidy5 >/dev/null; then
+	tidy="tidy5"
+elif command -v tidy >/dev/null; then
+	tidy="tidy"
+else
+	echo warning: HTML Tidy not found 1>&2
+	tidy=""
+fi
+
+# Create scratch directory (deleted when script exits)
+tmpdir=`mktemp -d`
+trap 'rm -rf -- "$tmpdir"' EXIT
+
+# Everything in static/ is deployed as-is.  A good place for stylesheets,
+# scripts, images, standalone HTML pages, etc.
+if [ -d static ]; then
+	cp -r static/* "$outdir"
+fi
+
+# Update href="./" and src="./" paths to replace the "./" with the relative
+# path to the top-level site directory.
+update_relative_path () {
+	path_to_root="$1"
+	html_input="$2"
+	html_output="$3"
+	cat "$html_input" |
+		sed "s|\( href=\"\)\./|\1$path_to_root|" | \
+		sed "s|\( src=\"\)\./|\1$path_to_root|" \
+		>"$html_output"
+}
+
+cd content
+find . -type f -name '*.md' | while IFS= read page; do
+	page_md_name=`basename "$page"`
+	page_html_name=`echo $page_md_name | sed 's/\.md$/.html/'`
+	echo "$page_md_name -> $page_html_name"
+
+	page_dir=`dirname "$page"`
+	mkdir -p "$outdir"/"$page_dir"
+
+	# Update relative paths in the header/footer to be correct for the
+	# location of this page.
+	page_toroot=`echo "$page_dir/" | sed 's|^./*||' | sed -r 's|[^/]+|..|g'`
+	update_relative_path "$page_toroot" "$rootdir"/layouts/header.html "$tmpdir"/header.html
+	update_relative_path "$page_toroot" "$rootdir"/layouts/footer.html "$tmpdir"/footer.html
+
+	tmpfile="$tmpdir"/"$page_html_name"
+
+	pandoc \
+		--from=markdown \
+		--to=html5 \
+		--standalone \
+		--preserve-tabs \
+		--eol=lf \
+		--toc \
+		--shift-heading-level-by=1 \
+		--highlight-style=monochrome \
+		--css="$page_toroot"style.css \
+		--include-before-body="$tmpdir"/header.html \
+		--include-after-body="$tmpdir"/footer.html \
+		"$page" --output="$tmpfile"
+
+	# The Pandoc HTML template includes the html5shiv script, using
+	# Internet Explorer conditional comments so that the script is only
+	# included for IE8 earlier.  Remove it.  Removing it here is easier
+	# than maintaining a fork of the template.
+	cat "$tmpfile" | \
+		grep -v '<!--\[if .*IE .*\]>' | \
+		grep -v '<script src=".*html5shiv.*"></script>' | \
+		grep -v '<!\[endif\]-->' \
+		> "$tmpfile.tmp"
+	mv "$tmpfile.tmp" "$tmpfile"
+
+	if [ "$tidy" != "" ]; then
+		set +e
+		"$tidy" \
+			-quiet \
+			-modify \
+			-utf8 \
+			-ashtml \
+			-omit \
+			--doctype html5 \
+			--newline LF \
+			--keep-tabs yes \
+			--wrap 0 \
+			"$tmpdir"/"$page_html_name"
+		tidy_status=$?
+		set -e
+		if [ $tidy_status -eq 2 ]; then
+			echo "error: $tidy exited with errors"
+			exit 1
+		fi
+	fi
+
+	mv "$tmpdir"/"$page_html_name" "$outdir"/"$page_dir"/"$page_html_name"
+done

@@ -1,0 +1,31 @@
+README
+======
+
+This is the repository for the following site: <https://ixtenu.neocities.org/>
+
+Dependencies
+------------
+
+- Unix utilities (sh, find, sed, grep, etc.)
+- pandoc <https://pandoc.org/>
+- HTML Tidy <https://www.html-tidy.org/>
+
+Building
+--------
+
+Run the "build" shell script, which takes no arguments.
+
+Directories
+-----------
+
+- public: Output directory for the build script.  This is the directory that
+  would be uploaded to web server.
+- content: The Markdown sources for the site content.  The *.md files in this
+  directory are made into HTML pages with pandoc(1).  Subdirectories are
+  preserved.  Files whose names don't end with *.md are ignored.
+- static: Files copied verbatim into public/.
+- layouts: HTML fragments used with pandoc(1).
+
+Loosely based on the directory structure used by Hugo (a static site
+generator with many more features than the homegrown script used by this
+repository).
