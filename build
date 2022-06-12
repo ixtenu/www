@@ -8,12 +8,6 @@ if [ $# -ne 0 ]; then
 	exit 1
 fi
 
-cd "$(dirname "$0")"
-rootdir="$(pwd)"
-rm -rf "$rootdir/public"
-mkdir "$rootdir/public"
-outdir="$(readlink -f "$rootdir"/public)"
-
 # HTML Tidy executable name
 if command -v tidy5 >/dev/null; then
 	tidy="tidy5"
@@ -24,9 +18,26 @@ else
 	tidy=""
 fi
 
+cd "$(dirname "$0")"
+rootdir="$(pwd)"
+outdir="$rootdir"/public
+
 # Create scratch directory (deleted when script exits)
 tmpdir="$(mktemp -d)"
 trap 'rm -rf -- "$tmpdir"' EXIT
+
+# if the output directory exists, temporarily save a copy of it as an
+# optimization for reusing pages which haven't changed
+olddir=
+if [ -d "$outdir" ]; then
+	olddir="$tmpdir"/old
+	mv "$outdir" "$olddir"
+fi
+
+# delete and recreate the output directory so that it's a clean slate
+rm -rf "$outdir"
+mkdir -p "$outdir"
+outdir="$(readlink -f "$outdir")"
 
 # Everything in static/ is deployed as-is.  A good place for stylesheets,
 # scripts, images, standalone HTML pages, etc.
@@ -34,9 +45,40 @@ if [ -d static ]; then
 	cp -r static/* "$outdir"
 fi
 
+# is system using GNU coreutils stat(1)?
+isgnustat() {
+	set +e
+	stat --version 2>/dev/null | grep GNU >/dev/null
+	grep_status=$?
+	set -e
+	return $grep_status
+}
+
+# file modification time in seconds since Unix epoch
+mtime() {
+	$(isgnustat) && echo "$(stat -c'%Y' "$1")" || echo "$(stat -f'%m' "$1")"
+}
+
+# file modifications fractional seconds
+mtime_frac() {
+	$(isgnustat) && \
+		echo "$(stat -c'%y' "$1" | sed 's/.*\.\([0-9]*\).*/\1/')" || \
+		echo "$(stat -f'%Fm' "$1" | sed 's/[0-9]*\.//')"
+}
+
+# is first file older than second file?
+# yes, this script is reinventing make(1)
+older_than() {
+	[ ! -f "$2" ] && return 1
+	[ $(mtime "$1") -lt $(mtime "$2") ] && return 0
+	[ $(mtime "$1") -gt $(mtime "$2") ] && return 1
+	[ $(mtime_frac "$1") -lt $(mtime_frac "$2") ] && return 0
+	return 1
+}
+
 # Update href="./" and src="./" paths to replace the "./" with the relative
 # path to the top-level site directory.
-update_relative_path () {
+update_relative_path() {
 	path_to_root="$1"
 	html_input="$2"
 	html_output="$3"
@@ -48,12 +90,24 @@ update_relative_path () {
 
 cd content
 find . -type f -name '*.md' | while IFS= read page; do
+	page_dir="$(dirname "$page")"
 	page_md_name="$(basename "$page")"
 	page_html_name="$(echo "$page_md_name" | sed 's/\.md$/.html/')"
-	echo "$page_md_name -> $page_html_name"
+	page_html_relpath="$page_dir"/"$page_html_name"
 
-	page_dir="$(dirname "$page")"
 	mkdir -p "$outdir"/"$page_dir"
+
+	if [ ! -z "$olddir" ]; then
+		# if the markdown hasn't been updated since the last build...
+		if older_than "$page" "$olddir"/"$page_html_relpath"; then
+			# reuse the previous HTML file
+			echo "$page_md_name unchanged"
+			mv "$olddir"/"$page_html_relpath" "$outdir"/"$page_html_relpath"
+			continue
+		fi
+	fi
+
+	echo "$page_md_name -> $page_html_name"
 
 	# Update relative paths in the header/footer to be correct for the
 	# location of this page.
@@ -77,10 +131,10 @@ find . -type f -name '*.md' | while IFS= read page; do
 		--include-after-body="$tmpdir"/footer.html \
 		"$page" --output="$tmpfile"
 
-	# The Pandoc HTML template includes the html5shiv script, using
-	# Internet Explorer conditional comments so that the script is only
-	# included for IE8 earlier.  Remove it.  Removing it here is easier
-	# than maintaining a fork of the template.
+	# The Pandoc HTML template includes the html5shiv script, using Internet
+	# Explorer conditional comments so that the script is only included for
+	# IE8 and earlier.  Remove it.  Removing it here is easier than
+	# maintaining a fork of the template.
 	cat "$tmpfile" | \
 		grep -v '<!--\[if .*IE .*\]>' | \
 		grep -v '<script src=".*html5shiv.*"></script>' | \
@@ -109,5 +163,5 @@ find . -type f -name '*.md' | while IFS= read page; do
 		fi
 	fi
 
-	mv "$tmpdir"/"$page_html_name" "$outdir"/"$page_dir"/"$page_html_name"
+	mv "$tmpdir"/"$page_html_name" "$outdir"/"$page_html_relpath"
 done
