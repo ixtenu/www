@@ -1,18 +1,18 @@
-#!/bin/sh
+#!/usr/bin/env sh
 # Generate a static HTML website from Markdown with pandoc(1).
 set -eu
 
 if [ $# -ne 0 ]; then
 	echo usage: $0 1>&2
-	echo Generate a static HTML website.
+	echo Generate a static HTML website. 1>&2
 	exit 1
 fi
 
-cd `dirname "$0"`
-rootdir=`pwd`
+cd "$(dirname "$0")"
+rootdir="$(pwd)"
 rm -rf "$rootdir/public"
 mkdir "$rootdir/public"
-outdir=`readlink -f "$rootdir"/public`
+outdir="$(readlink -f "$rootdir"/public)"
 
 # HTML Tidy executable name
 if command -v tidy5 >/dev/null; then
@@ -25,7 +25,7 @@ else
 fi
 
 # Create scratch directory (deleted when script exits)
-tmpdir=`mktemp -d`
+tmpdir="$(mktemp -d)"
 trap 'rm -rf -- "$tmpdir"' EXIT
 
 # Everything in static/ is deployed as-is.  A good place for stylesheets,
@@ -48,16 +48,16 @@ update_relative_path () {
 
 cd content
 find . -type f -name '*.md' | while IFS= read page; do
-	page_md_name=`basename "$page"`
-	page_html_name=`echo $page_md_name | sed 's/\.md$/.html/'`
+	page_md_name="$(basename "$page")"
+	page_html_name="$(echo "$page_md_name" | sed 's/\.md$/.html/')"
 	echo "$page_md_name -> $page_html_name"
 
-	page_dir=`dirname "$page"`
+	page_dir="$(dirname "$page")"
 	mkdir -p "$outdir"/"$page_dir"
 
 	# Update relative paths in the header/footer to be correct for the
 	# location of this page.
-	page_toroot=`echo "$page_dir/" | sed 's|^./*||' | sed -r 's|[^/]+|..|g'`
+	page_toroot="$(echo "$page_dir/" | sed 's|^./*||' | sed -r 's|[^/]+|..|g')"
 	update_relative_path "$page_toroot" "$rootdir"/layouts/header.html "$tmpdir"/header.html
 	update_relative_path "$page_toroot" "$rootdir"/layouts/footer.html "$tmpdir"/footer.html
 
