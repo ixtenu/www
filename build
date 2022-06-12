@@ -8,6 +8,11 @@ if [ $# -ne 0 ]; then
 	exit 1
 fi
 
+if ! command -v pandoc >/dev/null; then
+	echo error: pandoc not found 1>&2
+	exit 1
+fi
+
 # HTML Tidy executable name
 if command -v tidy5 >/dev/null; then
 	tidy="tidy5"
@@ -76,6 +81,16 @@ older_than() {
 	return 1
 }
 
+# are all given files (after the first) older than the first given file?
+all_older_than() {
+	first="$1"
+	shift
+	for f in "$@"; do
+		! $(older_than "$f"  "$first") && return 1
+	done
+	return 0
+}
+
 # Update href="./" and src="./" paths to replace the "./" with the relative
 # path to the top-level site directory.
 update_relative_path() {
@@ -98,8 +113,8 @@ find . -type f -name '*.md' | while IFS= read page; do
 	mkdir -p "$outdir"/"$page_dir"
 
 	if [ ! -z "$olddir" ]; then
-		# if the markdown hasn't been updated since the last build...
-		if older_than "$page" "$olddir"/"$page_html_relpath"; then
+		# if the HTML file is newer than all the files used to build it...
+		if all_older_than "$olddir"/"$page_html_relpath" "$page" "$rootdir"/layouts/*; then
 			# reuse the previous HTML file
 			echo "$page_md_name unchanged"
 			mv "$olddir"/"$page_html_relpath" "$outdir"/"$page_html_relpath"
